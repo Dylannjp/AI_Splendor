@@ -1,57 +1,49 @@
 import gymnasium as gym
-import torch
 import numpy as np
-from stable_baselines3 import DQN
-from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.torch_layers import CombinedExtractor
 from splendor_env import SplendorEnv
+from stable_baselines3 import DQN
 
-# Register the custom environment if not already registered
-try:
-    gym.envs.registration.register(
-        id="Splendor-v0",
-        entry_point="splendor_env:SplendorEnv",
-    )
-except gym.error.Error:
-    pass  # Already registered
 
-# Create two models: one trainable, one fixed opponent
-env = gym.make("Splendor-v0")
+def train():
+    # Create environment
+    env = SplendorEnv()
 
-model_A = DQN("MultiInputPolicy", env, verbose=1)
-model_B = DQN("MultiInputPolicy", env, verbose=0)
+    # Initialize two DQN agents: one for the player and one for the opponent
+    agent = DQN("Multi", env, verbose=1, tensorboard_log="./dqn_tensorboard/")
+    opponent = DQN("MlpPolicy", env, verbose=1, tensorboard_log="./dqn_opponent_tensorboard/")
 
-def self_play_train(model_A, model_B, total_episodes=100):
+    total_episodes = 100000
+    episode_rewards = []
+
     for episode in range(total_episodes):
-        print(f"\n[Episode {episode}] Starting...")
-        obs, _ = env.reset()
-        terminated, truncated = False, False
-        current_player = 0  # 0 = A, 1 = B
+        obs, _ = env.reset()  # Reset environment to start a new episode
+        done = False
+        episode_reward = 0
+        while not done:
+            # Player's turn (agent)
+            action, _ = agent.predict(obs)
+            obs, reward, terminated, truncated, _ = env.step(action, is_opponent=False)
+            episode_reward += reward
 
-        while not (terminated or truncated):
-            if current_player == 0:
-                action, _ = model_A.predict(obs, deterministic=False)
-            else:
-                action, _ = model_B.predict(obs, deterministic=True)
+            if terminated or truncated:
+                done = True
+                break
 
-            obs, reward, terminated, truncated, info = env.step(action)
-            current_player = 1 - current_player
+            # Opponent's turn
+            action, _ = opponent.predict(obs)
+            obs, reward, terminated, truncated, _ = env.step(action, is_opponent=True)
+            episode_reward += reward
 
-        print(f"[Episode {episode}] Finished. Starting learning...")
-        model_A.learn(total_timesteps=1024, reset_num_timesteps=False)
+            if terminated or truncated:
+                done = True
+                break
 
-        # Self-play model update
-        if episode % 10 == 0:
-            model_B.set_parameters(model_A.get_parameters())
-            print(f"[Episode {episode}] Synced opponent model B with model A")
+        episode_rewards.append(episode_reward)
+        if episode % 100 == 0:
+            print(f"Episode {episode}/{total_episodes}, Reward: {episode_reward}")
 
-        # Evaluation
-        if episode % 20 == 0:
-            mean_reward, _ = evaluate_policy(model_A, env, n_eval_episodes=5)
-            print(f"[Evaluation] Mean reward of model A: {mean_reward:.2f}")
+    print("Training completed.")
+    print(f"Average reward over episodes: {np.mean(episode_rewards)}")
 
-    model_A.save("splendor_agent_A")
-    model_B.save("splendor_agent_B")
-
-# Run training loop
-self_play_train(model_A, model_B, total_episodes=100)
+if __name__ == "__main__":
+    train()
