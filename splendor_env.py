@@ -83,19 +83,15 @@ class SplendorEnv(gym.Env):
             "opponent_score": self.opponent_score,
         }
 
-    def reveal_cards(self, card_array):
+    def reveal_cards(self, card_array): # flip a card from the deck into play
         deck_indices = np.where(card_array == 0)[0]
+        if len(deck_indices) == 0: # no cards left in the deck
+            return
+    
         reveal_indices = np.random.choice(deck_indices, 1, replace=False)
         card_array[reveal_indices] = 1
 
-    def take_3_different_gems(self, combo_id, is_opponent=False):
-        """
-        The player or opponent takes 3 different gems from the board.
-        Args:
-        - combo_id: the combination index to pick gems
-        - is_opponent: flag to indicate if the action is for the opponent
-        """
-        # Select correct gem pool based on the player or opponent
+    def take_3_different_gems(self, combo_id, is_opponent=False): # take 3 different gems from the board
         if is_opponent:
             gems = self.opponent_gems
         else:
@@ -103,9 +99,9 @@ class SplendorEnv(gym.Env):
         board_gems = self.board_gems
 
         available_colors = [i for i in range(5) if board_gems[i] > 0]
-        if len(available_colors) < 3:
+        if len(available_colors) < 3: # if there aren't enough gems to take 3 different ones
             if combo_id >= len(available_colors):
-                return -1.0
+                return -0.5
             gem = available_colors[combo_id]
             board_gems[gem] -= 1
             gems[gem] += 1
@@ -113,13 +109,12 @@ class SplendorEnv(gym.Env):
 
         combos = list(combinations(available_colors, 3))
         if combo_id >= len(combos):
-            return -1.0
+            return -0.5
         for gem in combos[combo_id]:
             board_gems[gem] -= 1
             gems[gem] += 1
 
-        # Update the correct gem pool (either player or opponent)
-        if is_opponent:
+        if is_opponent: # update gem pool (either player or opponent)
             self.opponent_gems = gems
         else:
             self.my_gems = gems
@@ -127,12 +122,6 @@ class SplendorEnv(gym.Env):
         return 0.0
 
     def take_2_same_gem(self, gem, is_opponent=False):
-        """
-        The player or opponent takes 2 of the same gem from the board.
-        Args:
-        - gem: the gem type being taken
-        - is_opponent: flag to indicate if the action is for the opponent
-        """
         if is_opponent:
             gems = self.opponent_gems
         else:
@@ -143,7 +132,6 @@ class SplendorEnv(gym.Env):
             board_gems[gem] -= 2
             gems[gem] += 2
 
-            # Update the correct gem pool (either player or opponent)
             if is_opponent:
                 self.opponent_gems = gems
             else:
@@ -151,27 +139,27 @@ class SplendorEnv(gym.Env):
 
             return 0.0
 
-        return -1.0
+        return -0.5
 
     def buy_card_from_board(self, card_id, is_opponent=False):
-        if card_id < 40:
-            card_array, card_data = self.tier1cards, self.tier1_card_data[card_id]
-        elif card_id < 70:
-            card_array, card_data = self.tier2cards, self.tier2_card_data[card_id - 40]
-            card_id -= 40
-        else:
-            card_array, card_data = self.tier3cards, self.tier3_card_data[card_id - 70]
-            card_id -= 70
+        # determine which tier the card belongs to
+        if card_id < 4: # tier 1
+            card_array, card_data = self.tier1cards, self.tier1_card_data
+        elif card_id < 8:  # tier 2 
+            card_array, card_data = self.tier2cards, self.tier2_card_data
+            card_id -= 4  
+        else:  # tier 3 
+            card_array, card_data = self.tier3cards, self.tier3_card_data
+            card_id -= 8
+        revealed_cards = np.where(card_array == 1)[0]
+        actual_card_index = revealed_cards[card_id] # index of the card the agent is trying to buy
+        card_data = card_data[actual_card_index] # data of the card the agent is trying to buy
 
-        if card_array[card_id] != 1 and card_array[card_id] != 4:  # 4 means bought by opponent
-            return -1.0
-
-        if not self.can_afford(card_data, is_opponent):
-            return -1.0
+        if not self.can_afford(card_data, is_opponent): # can the agent afford the card?
+            return -0.5
 
         self.pay_for_card(card_data, is_opponent)  # pay for the card
         
-        # Update the card status to bought by the respective player
         if is_opponent:
             card_array[card_id] = 4  # Mark as bought by opponent
             self.opponent_score += card_data[0]
@@ -183,61 +171,83 @@ class SplendorEnv(gym.Env):
 
         self.reveal_cards(card_array)
         self.check_nobles(is_opponent)
-        return 1.0 + card_data[0]
+        return 3 + card_data[0]*3
 
     def reserve_card(self, card_id, is_opponent=False):
-        if card_id < 40:
-            card_array = self.tier1cards
-        elif card_id < 70:
-            card_array = self.tier2cards
-            card_id -= 40
+        # determine which tier the card belongs to
+        if card_id < 4: # tier 1
+            card_array, card_data = self.tier1cards, self.tier1_card_data
+        elif card_id < 8:  # tier 2 
+            card_array, card_data = self.tier2cards, self.tier2_card_data
+            card_id -= 4  
+        else:  # tier 3 
+            card_array, card_data = self.tier3cards, self.tier3_card_data
+            card_id -= 8
+
+        revealed_cards = np.where(card_array == 1)[0]
+        actual_card_index = revealed_cards[card_id] # index of the card the agent is trying to buy
+        card_data = card_data[actual_card_index] # data of the card the agent is trying to buy
+
+        if is_opponent:
+            card_array[card_id] = 2 # reserved by opponent
         else:
-            card_array = self.tier3cards
-            card_id -= 70
+            card_array[card_id] == 3 # reserved by player
 
-        # Check if the card is available to be reserved (must be in play, not reserved or bought)
-        if card_array[card_id] != 1:  # 1 means the card is in play and not reserved or bought
-            return -1.0
-
-        # Mark the card as reserved by the player or opponent
-        card_array[card_id] = 3 if not is_opponent else 2  # 3 = reserved by player, 2 = reserved by opponent
-
-        # Give the player or opponent a gold gem for reserving the card
-        if self.board_gems[5] > 0:
+        if self.board_gems[5] > 0: # gold gem for reserving a card, if available
             self.board_gems[5] -= 1
             if is_opponent:
                 self.opponent_gems[5] += 1  # Opponent receives a gold gem
             else:
                 self.my_gems[5] += 1  # Player receives a gold gem
 
-        return 0.5
+        self.reveal_cards(card_array)
 
-    def buy_reserved_card(self, card_id, is_opponent=False):
-        # Determine which tier the card belongs to
-        if card_id < 40:
+        return 2.0
+
+    def buy_reserved_card(self, slot, is_opponent=False):
+
+        reserved_cards = []  # List to store the indices of reserved cards
+
+        if is_opponent: # search for reserved cards by the opponent (value = 2)
+            for idx in range(len(self.tier1cards)):
+                if self.tier1cards[idx] == 2:
+                    reserved_cards.append(('tier1', idx))
+            for idx in range(len(self.tier2cards)):
+                if self.tier2cards[idx] == 2:
+                    reserved_cards.append(('tier2', idx))
+            for idx in range(len(self.tier3cards)):
+                if self.tier3cards[idx] == 2:
+                    reserved_cards.append(('tier3', idx))
+
+        else: # search for reserved cards by the player (value = 3)
+            for idx in range(len(self.tier1cards)):
+                if self.tier1cards[idx] == 3:  
+                    reserved_cards.append(('tier1', idx))
+            for idx in range(len(self.tier2cards)):
+                if self.tier2cards[idx] == 3:  
+                    reserved_cards.append(('tier2', idx))
+            for idx in range(len(self.tier3cards)):
+                if self.tier3cards[idx] == 3: 
+                    reserved_cards.append(('tier3', idx))
+
+        if len(reserved_cards) <= slot:
+            return -0.5
+        tier, card_id = reserved_cards[slot] # get the tier and card id of the reserved card based on the slot
+
+        # determine which tier and card data to use
+        if tier == 'tier1':
             card_array = self.tier1cards
             card_data = self.tier1_card_data[card_id]
-        elif card_id < 70:
+        elif tier == 'tier2':
             card_array = self.tier2cards
-            card_data = self.tier2_card_data[card_id - 40]
-            card_id -= 40
+            card_data = self.tier2_card_data[card_id]
         else:
             card_array = self.tier3cards
-            card_data = self.tier3_card_data[card_id - 70]
-            card_id -= 70
+            card_data = self.tier3_card_data[card_id]
 
-        if is_opponent: # check if card has been reserved properly
-            if card_array[card_id] != 2:
-                return -1.0
-        else:
-            if card_array[card_id] != 3:
-                return -1.0
-
-        # Ensure the agent (player or opponent) can afford the card
         if not self.can_afford(card_data, is_opponent):
-            return -1.0  # Not enough gems to afford the card
+            return -0.5 
 
-        # Pay for the reserved card (whether player or opponent)
         self.pay_for_card(card_data, is_opponent)
 
         if is_opponent:            
@@ -252,7 +262,7 @@ class SplendorEnv(gym.Env):
         # Check if the agent has gained a noble after buying the card
         self.check_nobles(is_opponent)
 
-        return 1.0 + card_data[0]  # Return reward for buying the card
+        return 3.0 + card_data[0]*3  # Return reward for buying the card
 
     def can_afford(self, card_data, is_opponent=False):
         if is_opponent:
@@ -269,7 +279,6 @@ class SplendorEnv(gym.Env):
         return True
 
     def pay_for_card(self, card_data, is_opponent=False):
-
         if is_opponent:
             gems = self.opponent_gems
             bonuses = self.opponent_bonuses
@@ -278,55 +287,49 @@ class SplendorEnv(gym.Env):
             bonuses = self.my_bonuses
 
         for i in range(5):  
-            # Calculate how many gems of the current type are needed, considering the bonuses
-            needed = max(0, card_data[1 + i] - bonuses[i])
-            to_pay = min(gems[i], needed)  # Pay as much as possible from the available gems
 
-            # Deduct gems from the agent's collection and add them to the board
+            needed = max(0, card_data[1 + i] - bonuses[i]) # how many gems are needed after bonuses
+            to_pay = min(gems[i], needed) 
+
             gems[i] -= to_pay
             self.board_gems[i] += to_pay
-            needed -= to_pay  # Reduce the remaining needed gems
+            needed -= to_pay
 
-            # If there are still gems left to pay, use gold (gem index 5)
-            if needed > 0:
-                gems[5] -= needed  # Pay using gold
-                self.board_gems[5] += needed  # Add the gold back to the board's gem supply
+            if needed > 0: # if there are still gems needed, use gold gems
+                gems[5] -= needed
+                self.board_gems[5] += needed
 
-        # After the transaction, check if the agent's gems need to be updated
         if is_opponent:
-            self.opponent_gems = gems  # Update the opponent's gem count
+            self.opponent_gems = gems
         else:
-            self.my_gems = gems  # Update the player's gem count
+            self.my_gems = gems
 
     def check_nobles(self, is_opponent=False):
-        # Determine which bonuses to check based on whether it's the opponent or the player
         if is_opponent:
             bonuses = self.opponent_bonuses
         else:
             bonuses = self.my_bonuses
 
-        # Loop through each noble
-        for idx, status in enumerate(self.nobles):
-            # If the noble is in play (status == 1), check if the agent has the required bonuses
-            if status == 1 and all(bonuses[i] >= self.nobles_data[idx][i] for i in range(5)):
-                # Noble has been claimed
-                if self.render_mode:
-                    print(f"Claimed noble {idx}!")
+        for idx in range(len(self.nobles)):
+            # if the noble is in play (status == 1), check if the agent has the required bonuses
+            if self.nobles[idx] == 1:
+                if all(bonuses[i] >= self.nobles_data[idx][i] for i in range(5)): # claim the noble
+                    if self.render_mode:
+                        print(f"Claimed noble {idx}!")
 
-                if is_opponent:
-                    self.nobles[idx] = 2  # Mark noble as claimed by the opponent
-                    self.opponent_score += 3  # Add points to the opponent's score
-                else:
-                    self.nobles[idx] = 3  # Mark noble as claimed by the player
-                    self.my_score += 3  # Add points to the player's score
+                    if is_opponent:
+                        self.nobles[idx] = 2  # Mark noble as claimed by the opponent
+                        self.opponent_score += 3  # Add points to the opponent's score
+                    else:
+                        self.nobles[idx] = 3  # Mark noble as claimed by the player
+                        self.my_score += 3  # Add points to the player's score
 
     def handle_gem_discard(self, gems, total_gems, is_opponent=False):
-        """
-        Handles the discarding of excess gems if total gems exceed the limit (10).
-        Args:
-        - gems: the gem pool for either the player or the opponent (self.my_gems or self.opponent_gems)
-        - total_gems: the total number of gems the agent (player or opponent) holds
-        """
+        if is_opponent:
+            gems = self.opponent_gems
+        else:
+            gems = self.my_gems
+
         excess = total_gems - 10
         for i in range(6):
             to_discard = min(excess, gems[i])
@@ -336,11 +339,10 @@ class SplendorEnv(gym.Env):
             if excess == 0:
                 break
 
-        # Update the correct gem pool (either player or opponent)
         if is_opponent:
-            self.opponent_gems = gems  # Update the player's gems
+            self.opponent_gems = gems
         else:
-            self.my_gems = gems  # Update the opponent's gems
+            self.my_gems = gems
 
     def decode_action(self, action):
         if action < 10:
@@ -360,7 +362,6 @@ class SplendorEnv(gym.Env):
             return self.observation(), 0.0, True, self.info
 
         action_info = self.decode_action(action)
-        reward = -1.0
 
         if action_info["type"] == "take_3":
             reward = self.take_3_different_gems(action_info["combo_id"], is_opponent=is_opponent)

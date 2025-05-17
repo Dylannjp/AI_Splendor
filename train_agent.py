@@ -9,8 +9,8 @@ def train():
     env = SplendorEnv()
 
     # Initialize two DQN agents: one for the player and one for the opponent
-    agent = DQN("Multi", env, verbose=1, tensorboard_log="./dqn_tensorboard/")
-    opponent = DQN("MlpPolicy", env, verbose=1, tensorboard_log="./dqn_opponent_tensorboard/")
+    agent = DQN("MultiInputPolicy", env, verbose=1, tensorboard_log="./dqn_tensorboard/")
+    opponent = DQN("MultiInputPolicy", env, verbose=1, tensorboard_log="./dqn_opponent_tensorboard/")
 
     total_episodes = 100000
     episode_rewards = []
@@ -41,7 +41,8 @@ def train():
         episode_rewards.append(episode_reward)
         if episode % 100 == 0:
             print(f"Episode {episode}/{total_episodes}, Reward: {episode_reward}")
-
+        agent.save("agent_splendor")
+        opponent.save("opponent_splendor")
     print("Training completed.")
     print(f"Average reward over episodes: {np.mean(episode_rewards)}")
 
