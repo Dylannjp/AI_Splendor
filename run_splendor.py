@@ -1,5 +1,3 @@
-# run_splendor.py
-
 import numpy as np
 from splendor_env import SplendorEnv
 from game_logic.splendor_game import ActionType, COLOR_NAMES
@@ -27,10 +25,9 @@ def describe_action(move):
     return typ.name
 
 def print_state(game):
-    # 1) board gems
+
     print("  board gems  :", game.board_gems.tolist())
 
-    # 2) face-up cards
     for lvl in range(3):
         cards = []
         for c in game.board_cards[lvl]:
@@ -39,11 +36,9 @@ def print_state(game):
             cards.append(row)
         print(f"  tier {lvl+1} face-up:", cards)
 
-    # 3) nobles
     noble_reqs = [n.requirement.tolist() for n in game.nobles]
     print("  nobles reqs :", noble_reqs)
 
-    # 4) each player
     for i,p in enumerate(game.players):
         gems = p.gems.tolist()
         bonuses = p.bonuses.tolist()
@@ -78,9 +73,8 @@ def main():
         env.step(action)
         turn += 1
 
-        # all done?
         if all(env.terminations[a] for a in env.agents):
-            print("🎮 Game over.")
+            print("Game over.")
             break
 
     env.close()
