@@ -2,67 +2,62 @@ from splendor_env import SplendorEnv
 import numpy as np
 
 def test_raw_environment():
-    """Test the raw SplendorEnv without any wrappers"""
+    # Test the raw SplendorEnv without any wrappers, playing multiple games.
     print("Testing raw SplendorEnv...")
-    
+
     env = SplendorEnv()
     obs, info = env.reset(seed=42)
-    
+
     step_count = 0
     empty_mask_count = 0
-    
+    game_count = 0
+
     print(f"Initial agent: {env.agent_selection}")
     print(f"Initial mask sum: {obs['action_mask'].sum()}")
-    
-    for step in range(500):  # Test many steps
+
+    max_steps = 50000
+    for step in range(max_steps):
         current_agent = env.agent_selection
         obs = env.observe(current_agent)
         mask = obs['action_mask']
-        
+
         if mask.sum() == 0:
             empty_mask_count += 1
             print(f"\n[EMPTY MASK #{empty_mask_count}] Step {step}")
             print(f"  Current agent: {current_agent}")
             print(f"  Terminations: {env.terminations}")
             print(f"  Truncations: {env.truncations}")
-            
             if env.game:
                 agent_idx = env.agent_name_mapping[current_agent]
-                try:
-                    legal_actions = env.game.legal_actions(agent_idx)
-                    print(f"  Direct legal actions: {len(legal_actions)}")
-                    print(f"  Game VPs: {[p.VPs for p in env.game.players]}")
-                    print(f"  Game gems: {[p.gems.sum() for p in env.game.players]}")
-                except Exception as e:
-                    print(f"  Error getting legal actions: {e}")
-            
-            # This should not happen in a working game
+                legal_actions = env.game.legal_actions(agent_idx)
+                print(f"  Direct legal actions: {len(legal_actions)}")
+                print(f"  Game VPs: {[p.VPs for p in env.game.players]}")
+                print(f"  Game gems: {[p.gems.sum() for p in env.game.players]}")
             print("  CRITICAL: Empty mask detected!")
             break
-        
-        # Take random valid action
+
+        # take a random valid action
         valid_indices = np.where(mask)[0]
-        if len(valid_indices) > 0:
-            action_idx = np.random.choice(valid_indices)
-            env.step(action_idx)
-            step_count += 1
-            
-            # Check if game ended
-            if any(env.terminations.values()) or any(env.truncations.values()):
-                print(f"\nGame ended at step {step}")
-                print(f"Terminations: {env.terminations}")
-                print(f"Rewards: {env.rewards}")
-                break
-        else:
-            print(f"No valid actions at step {step} - this shouldn't happen!")
-            break
-    
-    print(f"\nTest completed. Steps taken: {step_count}")
+        action_idx = np.random.choice(valid_indices)
+        env.step(action_idx)
+        step_count += 1
+
+        # if game ended, count it and immediately reset
+        if any(env.terminations.values()) or any(env.truncations.values()):
+            game_count += 1
+            print(f"\nGame #{game_count} ended at step {step}")
+            print(f"  Terminations: {env.terminations}")
+            print(f"  Rewards: {env.rewards}")
+            # reset and carry on
+            obs = env.reset()
+            continue
+
+    print(f"\nTest completed. Total steps: {step_count}, games played: {game_count}")
     print(f"Empty masks encountered: {empty_mask_count}")
     
 
 def test_action_consistency():
-    """Test if all_actions and legal_actions are consistent"""
+    # Test if all_actions and legal_actions are consistent
     print("\nTesting action consistency...")
     
     env = SplendorEnv()

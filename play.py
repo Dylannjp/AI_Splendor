@@ -10,7 +10,6 @@ import numpy as np
 
 
 class SB3ActionMaskWrapper(pettingzoo.utils.BaseWrapper, gym.Env):
-    """Bridges your multi‐agent SplendorEnv → single‐agent Gym for SB3 + masking."""
     def reset(self, seed=None, options=None):
         super().reset(seed=seed, options=options)
         self.observation_space = super().observation_space(self.possible_agents[0])["observation"]
@@ -43,12 +42,8 @@ def mask_fn(env: SB3ActionMaskWrapper) -> np.ndarray:
 
 
 def make_env(seed: int = 0):
-    """Factory to build and reset the wrapped env so SB3 sees correct spaces."""
-    # 1) Create & wrap the AEC env
     env = SB3ActionMaskWrapper(SplendorEnv(render_mode=None))
-    # 2) Reset to initialize spaces
     env.reset(seed=seed)
-    # 3) Wrap for action masking
     env = ActionMasker(env, mask_fn)
     return env
 
@@ -57,25 +52,15 @@ def main():
     model = MaskablePPO.load("splendor_model_20250528-200939.zip")
     venv = DummyVecEnv([lambda: make_env()])
     venv.reset()
-    obs = venv.reset()    # obs_dict is a dict
+    obs = venv.reset()
 
     while True:
-        # grab the *inner* env so you can query its mask() method
-        mask = venv.envs[0].action_masks()       # shape: (n_actions,)
-
-        # pass the array‐obs and mask to predict()
+        mask = venv.envs[0].action_masks()
         action, _ = model.predict(obs,
                                   action_masks=mask,
                                   deterministic=True)
-        # action is an array of shape (1,) → e.g. [17]
-
-        # step the VecEnv (always arrays/batches)
         obs, rewards, dones, infos = venv.step(action)
-
-        # render the inner env
         venv.envs[0].render()
-
-        # if episode ended, reset
         if dones[0]:
             obs = venv.reset()
 

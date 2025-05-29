@@ -1,5 +1,5 @@
 import random
-from game_logic.splendor_game import SplendorGame, ActionType, COLOR_NAMES
+from splendor_game import SplendorGame, ActionType, COLOR_NAMES
 
 def describe_action(action, card=None):
     typ, param = action

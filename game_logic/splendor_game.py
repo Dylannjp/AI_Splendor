@@ -150,8 +150,8 @@ class SplendorGame:
             if card and self.can_afford(player, card):
                 actions.append((ActionType.BUY_RESERVE, idx))
 
-        if actions is None:
-            actions.append(ActionType.PASS)  # Allow passing if no other actions
+        if len(actions) == 0:
+            actions.append((ActionType.PASS, None))  # Allow passing if no other actions
             
         return actions
 
@@ -213,7 +213,7 @@ class SplendorGame:
             if idx >= len(self.board_cards[level]) or self.board_cards[level][idx] is None:
                 return False
             card = self.board_cards[level][idx]
-            self.board_cards[level][idx] = None  # Don't pop, mark as None
+            self.board_cards[level][idx] = None
 
         player.reserved.append(card)
         if self.board_gems[5] > 0:
@@ -227,7 +227,7 @@ class SplendorGame:
             if idx >= len(self.board_cards[level]) or self.board_cards[level][idx] is None:
                 return False
             card = self.board_cards[level][idx]
-            self.board_cards[level][idx] = None  # Don't pop, mark as None
+            self.board_cards[level][idx] = None
 
         cost = card.cost - player.bonuses
         cost = np.clip(cost, 0, None)
@@ -255,16 +255,11 @@ class SplendorGame:
             if all(player.bonuses >= noble.requirement):
                 earned_nobles.append(noble)
         
-        # If multiple nobles can be claimed, player must choose one (Splendor rule)
-        # For simplicity here, we take the first one. A real env might need a 'CHOOSE_NOBLE' action.
         if earned_nobles:
-            chosen_noble = earned_nobles[0] # Simplification
+            chosen_noble = earned_nobles[0]
             player.VPs += chosen_noble.VPs
             # Remove it from the main list so it can't be claimed again
             for i, n in enumerate(self.nobles):
                 if n == chosen_noble:
                     self.nobles[i] = None # Mark as taken instead of removing, to keep indices stable
                     break
-
-
-    # --- You need game_data.py and player.py for this to run ---

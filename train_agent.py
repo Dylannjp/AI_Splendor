@@ -1,4 +1,5 @@
 import time
+import argparse
 import gymnasium as gym
 import numpy as np
 
@@ -54,19 +55,24 @@ def make_env(seed: int = 0):
     return env
 
 
-def train_splendor(steps: int = 50_000, seed: int = 0, save_path: str = "splendor_model"):
+def train_splendor(steps: int = 1_000_000, seed: int = 0, save_path: str = "splendor_model", checkpoint: str = None):
     # 1) Vectorize the mask‐wrapped Gym env
     venv = DummyVecEnv([lambda: make_env(seed)])
     venv.reset()
 
     # 2) Train with MaskablePPO
-    model = MaskablePPO(
-        MaskableActorCriticPolicy,
-        venv,
-        verbose=1,
-        seed=seed,
-        tensorboard_log="./logs/splendor",
-    )
+    if checkpoint:
+        print(f"Loading model from {checkpoint} and continuing training…")
+        model = MaskablePPO.load(checkpoint, env=venv, reset_num_timesteps=False)
+    else:
+        # If no checkpoint, create a new model
+        model = MaskablePPO(
+            MaskableActorCriticPolicy,
+            venv,
+            verbose=1,
+            seed=seed,
+            tensorboard_log="./logs/splendor",
+        )
     model.learn(total_timesteps=steps)
 
     # 3) Save
@@ -77,4 +83,33 @@ def train_splendor(steps: int = 50_000, seed: int = 0, save_path: str = "splendo
 
 
 if __name__ == "__main__":
-    train_splendor(steps=50_000)
+    p = argparse.ArgumentParser()
+    p.add_argument(
+        "--steps",
+        type=int,
+        default=500_000,
+        help="Number of timesteps to (continue) train for",
+    )
+    p.add_argument(
+        "--seed", type=int, default=0, help="Random seed for env and model"
+    )
+    p.add_argument(
+        "--save-path",
+        type=str,
+        default="splendor_model",
+        help="Prefix for your output model files",
+    )
+    p.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Path to an existing .zip checkpoint to continue from",
+    )
+    args = p.parse_args()
+
+    train_splendor(
+        steps=args.steps,
+        seed=args.seed,
+        save_path=args.save_path,
+        checkpoint=args.checkpoint,
+    )

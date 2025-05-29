@@ -12,7 +12,7 @@ class SplendorEnv(AECEnv):
     def __init__(self, render_mode=None):
         super().__init__()
         self.num_players = 2
-        self.max_per_turn = 66
+        self.max_per_turn = 67
         self.render_mode = render_mode
 
         self.agents = [f"player_{i}" for i in range(self.num_players)]
@@ -126,7 +126,7 @@ class SplendorEnv(AECEnv):
 
         if action < len(current_mask) and current_mask[action] == 1:
             action_to_take = self.all_actions[action]
-            print(f"Agent {agent} chose action {action_to_take} (legal).")
+            #print(f"Agent {agent} chose action {action_to_take} (legal).")
             self.game.step(action_to_take)
         else:
             print(f"CRITICAL WARNING: Agent {agent} chose illegal action {action}! Masking FAILED. Taking first legal.")
@@ -162,18 +162,13 @@ class SplendorEnv(AECEnv):
             for ag in self.agents:
                 self.terminations[ag] = True
                 self.rewards[ag] = 1.0 if ag == winner_agent else -1.0
-                self.infos[ag] = {} # Clear infos on termination
+                self.infos[ag] = {}
         else:
-             # If not done, set next agent (unless player needs to discard)
              if self.game.players[idx].gems.sum() <= self.game.MAX_GEMS:
                  self.agent_selection = self._selector.next()
-             # else: keep current player (they need to discard)
              
-             # Update infos for *all* agents
              for ag in self.agents:
                  if not self.terminations[ag]:
-                    # Generate legal actions for the *next* agent if turn changes,
-                    # or current agent if they need to discard.
                     current_player_idx = self.agent_name_mapping[self.agent_selection]
                     self.infos[ag] = {"legal_moves": self.game.legal_actions(current_player_idx)}
                  else:
@@ -184,7 +179,6 @@ class SplendorEnv(AECEnv):
         if self.render_mode == "human":
             self.render()
             
-    # ... (Keep render, close, observation_space, action_space) ...
     def render(self): pass
     def close(self): pass
     def observation_space(self, agent): 
