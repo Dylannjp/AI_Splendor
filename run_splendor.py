@@ -25,21 +25,16 @@ def describe_action(move):
     return typ.name
 
 def print_state(game):
-
     print("  board gems  :", game.board_gems.tolist())
-
     for lvl in range(3):
         cards = []
         for c in game.board_cards[lvl]:
-            # build a pure-Python list of ints
             row = [int(x) for x in (*c.cost, c.VPs, c.bonus)]
             cards.append(row)
         print(f"  tier {lvl+1} face-up:", cards)
-
-    noble_reqs = [n.requirement.tolist() for n in game.nobles]
+    noble_reqs = [n.requirement.tolist() for n in game.nobles if n is not None]
     print("  nobles reqs :", noble_reqs)
-
-    for i,p in enumerate(game.players):
+    for i, p in enumerate(game.players):
         gems = p.gems.tolist()
         bonuses = p.bonuses.tolist()
         print(f"  P{i} gems     : {gems}  bonuses: {bonuses}  VP: {p.VPs}")
@@ -49,8 +44,11 @@ def print_state(game):
 
 def main():
     env = SplendorEnv()
-    obs = env.reset()
+    obs, _ = env.reset()
     turn = 0
+
+    # Pre-grab the full action list for mapping indices back to tuples
+    all_actions = env.all_actions
 
     for agent in env.agent_iter():
         obs, reward, termination, truncation, info = env.last()
@@ -58,19 +56,23 @@ def main():
         game = env.unwrapped.game
 
         if termination or truncation:
-            action = None
             desc = "→ done"
+            action_idx = None
         else:
-            legal = game.legal_actions(idx)
-            mask = obs["legal_mask"]
+            mask = obs["action_mask"]
             choices = np.nonzero(mask)[0]
-            action = np.random.choice(choices)
-            desc = describe_action(legal[action])
+            if len(choices) == 0:
+                print(f"[ERROR] No legal moves for {agent} at turn {turn:03d}.")
+                return
+            action_idx = np.random.choice(choices)
+            action_tuple = all_actions[action_idx]
+            desc = describe_action(action_tuple)
 
         print(f"=== Turn {turn:03d} — {agent} {desc:<40} | reward={reward:.1f} ===")
         print_state(game)
 
-        env.step(action)
+        # Step only if there is an action to take
+        env.step(action_idx)
         turn += 1
 
         if all(env.terminations[a] for a in env.agents):
@@ -80,4 +82,5 @@ def main():
     env.close()
 
 if __name__ == "__main__":
-    main()
+    for _ in range(200):
+        main()

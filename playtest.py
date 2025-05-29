@@ -1,5 +1,5 @@
 import random
-from splendor_game import SplendorGame, ActionType, COLOR_NAMES
+from game_logic.splendor_game import SplendorGame, ActionType, COLOR_NAMES
 
 def describe_action(action, card=None):
     typ, param = action
@@ -23,8 +23,18 @@ def describe_action(action, card=None):
         return f"discards one {COLOR_NAMES[param]} gem"
     return f"does {typ.name}"
 
-def verbose_self_play(num_players=2, max_turns=200):
-    random.seed(0)
+def dump_full_state(game):
+    print(" Board gems:", game.board_gems)
+    for i, p in enumerate(game.players):
+        print(f" P{i} gems:", p.gems, "bonuses:", p.bonuses, "VPs:", p.VPs)
+        print(f"  reserved:", [(c.level, c.VPs) for c in p.reserved])
+    print(" Board sizes:", [len(b) for b in game.board_cards])
+    print(" Deck sizes :", [len(d) for d in game.decks])
+    print(" Nobles left:", [n.requirement for n in game.nobles if n])
+
+def verbose_self_play(num_players=2, max_turns=200, seed=None):
+    if seed is not None:
+        random.seed(seed)
     game = SplendorGame(num_players)
     game.setup_board()
     print("=== Starting Splendor self-play ===")
@@ -33,8 +43,8 @@ def verbose_self_play(num_players=2, max_turns=200):
         legals = game.legal_actions(p)
         if not legals:
             print(f"Turn {turn:03d}: Player {p} has no legal moves; stopping.")
+            dump_full_state(game)
             break
-
         action = random.choice(legals)
 
         # record the card (if any) before modifying the state
