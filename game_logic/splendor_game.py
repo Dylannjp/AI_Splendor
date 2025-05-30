@@ -36,10 +36,17 @@ class SplendorGame:
         self.setup_board()
 
         self.players = [Player() for _ in range(num_players)]
+
         self.current_player = 0
+        self.first_player = self.current_player
+        self.final_turn = False
+        self.game_over = False
         
         # Add the fixed list of all possible actions
         self.all_actions = self._get_all_possible_actions()
+        self.action_to_idx = {
+            action: idx for idx, action in enumerate(self.all_actions)
+        }
 
     def setup_deck(self):
         for lvl, data in [(0, tier1_card_data),
@@ -72,7 +79,7 @@ class SplendorGame:
                     self.board_cards[level][slot] = self.decks[level].pop()
 
     def _get_all_possible_actions(self):
-        """Generates a fixed list of all 66 possible action types."""
+        """Generates a fixed list of all 67 possible action types."""
         actions = []
         colors = list(range(5))
 
@@ -100,7 +107,8 @@ class SplendorGame:
 
         # Discard (6)
         actions.extend([(ActionType.DISCARD, c) for c in list(range(6))])
-
+        
+        # Pass (1) (Effecttively resigning because there's no way you win after this happens)
         actions.extend([(ActionType.PASS, None)])
 
         assert len(actions) == 67, f"Expected 67 actions, got {len(actions)}"
@@ -159,6 +167,8 @@ class SplendorGame:
         type, param = action
         player = self.players[self.current_player]
 
+        if self.game_over:
+            print("why are we here")
         if type is ActionType.TAKE_DIFF:
             self.take_gems(player, list(param))
         elif type is ActionType.TAKE_SAME:
@@ -191,8 +201,13 @@ class SplendorGame:
         # If player must discard, don't advance turn
         if player.gems.sum() > self.MAX_GEMS:
             return
+        
+        if player.VPs >= 15 and not self.final_turn:
+            self.final_turn = True
 
         self.current_player = (self.current_player + 1) % len(self.players)
+        if self.final_turn and self.current_player == self.first_player:
+            self.game_over = True
 
     def can_afford(self, player, card):
         cost = card.cost - player.bonuses
@@ -263,3 +278,22 @@ class SplendorGame:
                 if n == chosen_noble:
                     self.nobles[i] = None # Mark as taken instead of removing, to keep indices stable
                     break
+        
+    def decide_winner(self):
+        if not self.game_over:
+            return None
+        
+        max_vp = max(player.VPs for player in self.players)
+        max_bonus = max(player.bonuses.sum() for player in self.players)
+        winner = [i for i, player in enumerate(self.players) if player.VPs == max_vp]
+        
+        if len(winner) == 1:
+            #print (f"Player {winner[0]} wins with {max_vp} VPs")
+            return winner[0]
+        else:
+            winner = [i for i, player in enumerate(self.players) if self.players[i].bonuses.sum() < max_bonus]
+            #print (f"Player {winner[0]} win with {max_vp} VPs and {max_bonus} bonuses")
+            return winner[0]
+        
+
+# No empty masks, consistent action lists! Environment is good now it seems.

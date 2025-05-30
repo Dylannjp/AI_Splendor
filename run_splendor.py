@@ -76,11 +76,10 @@ def main():
         turn += 1
 
         if all(env.terminations[a] for a in env.agents):
-            print("Game over.")
             break
 
     env.close()
 
 if __name__ == "__main__":
-    for _ in range(200):
+    for _ in range(1):
         main()

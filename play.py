@@ -49,7 +49,7 @@ def make_env(seed: int = 0):
 
 
 def main():
-    model = MaskablePPO.load("splendor_model_20250528-200939.zip")
+    model = MaskablePPO.load("splendor_model_20250529-233543.zip")
     venv = DummyVecEnv([lambda: make_env()])
     venv.reset()
     obs = venv.reset()

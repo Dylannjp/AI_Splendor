@@ -26,7 +26,7 @@ def describe_action(action, card=None):
 def dump_full_state(game):
     print(" Board gems:", game.board_gems)
     for i, p in enumerate(game.players):
-        print(f" P{i} gems:", p.gems, "bonuses:", p.bonuses, "VPs:", p.VPs)
+        print(f" P{i} gems:", p.gems, "bonuses:", p.bonuses, "VPs:", p.VPs)4
         print(f"  reserved:", [(c.level, c.VPs) for c in p.reserved])
     print(" Board sizes:", [len(b) for b in game.board_cards])
     print(" Deck sizes :", [len(d) for d in game.decks])
@@ -36,9 +36,9 @@ def verbose_self_play(num_players=2, max_turns=200, seed=None):
     if seed is not None:
         random.seed(seed)
     game = SplendorGame(num_players)
-    game.setup_board()
     print("=== Starting Splendor self-play ===")
     for turn in range(max_turns):
+        
         p = game.current_player
         legals = game.legal_actions(p)
         if not legals:
@@ -73,8 +73,9 @@ def verbose_self_play(num_players=2, max_turns=200, seed=None):
 
         print(f"Turn {turn:03d}: Player {p} {desc}; now has {after_vp} points")
 
-        if after_vp >= 15:
-            print(f"🏆 Player {p} wins on turn {turn:03d}!")
+        if game.game_over:
+            winner = game.decide_winner()
+            print(f"player {winner} wins! game ends after {turn-1} turns!")
             break
 
 if __name__ == "__main__":

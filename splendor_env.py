@@ -3,8 +3,7 @@ from pettingzoo.utils import agent_selector, wrappers
 from pettingzoo.utils.env import AECEnv
 from pettingzoo.test import api_test # Keep commented for training
 from gymnasium import spaces
-
-from game_logic.splendor_game import SplendorGame
+from game_logic.splendor_game import SplendorGame, ActionType
 
 class SplendorEnv(AECEnv):
     metadata = {"render_modes": ["human"], "name": "splendor_v0"}
@@ -99,11 +98,8 @@ class SplendorEnv(AECEnv):
         
         legal_actions_list = gp.legal_actions(idx)
         mask = np.zeros(self.max_per_turn, dtype=np.int8)
-        legal_actions_set = set(legal_actions_list)
-
-        for i, action in enumerate(self.all_actions):
-            if action in legal_actions_set:
-                mask[i] = 1
+        for action in legal_actions_list:
+            mask[gp.action_to_idx[action]] = 1
 
         expected_dim = self.observation_spaces[agent]["observation"].shape[0]
         if len(obs_vector) != expected_dim:
@@ -121,9 +117,21 @@ class SplendorEnv(AECEnv):
 
         agent = self.agent_selection
         idx = self.agent_name_mapping[agent]
-        
         current_mask = self.observe(agent)["action_mask"]
+        pass_idx = self.game.action_to_idx[(ActionType.PASS, None)]
 
+        if action == pass_idx: # if action is to pass, just resign you're cooked
+            print(f"Agent {agent} chose to pass (resign).")
+            for ag in self.agents:
+                self.terminations[ag] = True
+                if ag == agent:
+                    self.rewards[ag] = -1.0
+                else:
+                    self.rewards[ag] = +1.0
+                self.infos[ag] = {}
+            self._accumulate_rewards()
+            return
+        
         if action < len(current_mask) and current_mask[action] == 1:
             action_to_take = self.all_actions[action]
             #print(f"Agent {agent} chose action {action_to_take} (legal).")
@@ -144,12 +152,14 @@ class SplendorEnv(AECEnv):
                  self.terminations = {a: True for a in self.agents}
                  return
 
-        done = any(p.VPs >= 15 for p in self.game.players)
+        done = self.game.game_over
+        if done:
+            winner = self.game.decide_winner()
         for ag in self.agents:
             self.rewards[ag] = 0
 
         if done:
-            print(f"Game over! Player {idx} reached 15 VPs.")
+            print(f"Game over! Player {winner} has won with {self.game.players[winner].VPs} VPs.")
             winner_score = -1
             winner_agent = None
             for ag in self.agents:

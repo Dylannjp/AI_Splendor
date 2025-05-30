@@ -55,7 +55,7 @@ def make_env(seed: int = 0):
     return env
 
 
-def train_splendor(steps: int = 1_000_000, seed: int = 0, save_path: str = "splendor_model", checkpoint: str = None):
+def train_splendor(steps: int = 100_000, seed: int = 0, save_path: str = "splendor_model", checkpoint: str = None):
     # 1) Vectorize the mask‐wrapped Gym env
     venv = DummyVecEnv([lambda: make_env(seed)])
     venv.reset()
@@ -64,6 +64,8 @@ def train_splendor(steps: int = 1_000_000, seed: int = 0, save_path: str = "sple
     if checkpoint:
         print(f"Loading model from {checkpoint} and continuing training…")
         model = MaskablePPO.load(checkpoint, env=venv, reset_num_timesteps=False)
+        tensorboard_log="./logs/splendor",
+        tb_log_name = "PPO_1"
     else:
         # If no checkpoint, create a new model
         model = MaskablePPO(
@@ -87,7 +89,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--steps",
         type=int,
-        default=500_000,
+        default=100_000,
         help="Number of timesteps to (continue) train for",
     )
     p.add_argument(
