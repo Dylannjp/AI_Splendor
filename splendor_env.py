@@ -114,9 +114,9 @@ class SplendorEnv(AECEnv):
         if self.terminations[self.agent_selection] or self.truncations[self.agent_selection]:
             self._was_dead_step(action)
             return
-
         agent = self.agent_selection
         idx = self.agent_name_mapping[agent]
+        player = self.game.players[idx]
         current_mask = self.observe(agent)["action_mask"]
         pass_idx = self.game.action_to_idx[(ActionType.PASS, None)]
 
@@ -134,7 +134,15 @@ class SplendorEnv(AECEnv):
         
         if action < len(current_mask) and current_mask[action] == 1:
             action_to_take = self.all_actions[action]
-            #print(f"Agent {agent} chose action {action_to_take} (legal).")
+            # print(f"Agent {agent} chose action {action_to_take} (legal).")
+
+            if action_to_take[0] is ActionType.BUY_RESERVE:
+                res_idx = action_to_take[1]
+                # grab a reference to that reserved card *before* stepping
+                reserved_card = player.reserved[res_idx]
+            else:
+                reserved_card = None
+                
             self.game.step(action_to_take)
         else:
             print(f"CRITICAL WARNING: Agent {agent} chose illegal action {action}! Masking FAILED. Taking first legal.")
@@ -146,50 +154,81 @@ class SplendorEnv(AECEnv):
             print(f"         legal_actions_list (raw) = {legal_actions_list}")
             legal_actions_list = self.game.legal_actions(idx)
             if legal_actions_list:
-                self.game.step(legal_actions_list[0])
+                action_to_take = legal_actions_list[0]
+                self.game.step(action_to_take)
             else:
                  print(f"Error: No legal actions for agent {agent} on illegal action step.")
                  self.terminations = {a: True for a in self.agents}
                  return
+            
+        if action_to_take[0] is ActionType.BUY_BOARD:
+            lvl, _ = action_to_take[1]
+            if lvl == 1:
+                self.rewards[agent] += 0.075  # <-- tier bonus here
+            elif lvl == 2:
+                self.rewards[agent] += 0.15
+        elif action_to_take[0] is ActionType.BUY_RESERVE:
+            res_idx = action_to_take[1]
+
+            # 2) Tier bonus (exactly the same numbers you used in BUY_BOARD):
+            if reserved_card.level == 1:
+                self.rewards[agent] += 0.075    # Tier 2  +0.075
+            elif reserved_card.level == 2:
+                self.rewards[agent] += 0.15    # Tier 3  +0.150
+
+        # elif action_to_take[0] is ActionType.RESERVE_CARD:
+        #     lvl, _ = action_to_take[1]
+        #     if lvl == 1:
+        #         self.rewards[agent] += 0.03  # <-- tier bonus here
+        #     if lvl == 2:
+        #         self.rewards[agent] += 0.06
+        elif action_to_take[0] is ActionType.DISCARD:
+            self.rewards[agent] -= 0.075  # <-- discard bonus
 
         done = self.game.game_over
-        if done:
+        if done: 
             winner = self.game.decide_winner()
-        for ag in self.agents:
-            self.rewards[ag] = 0
-
-        if done:
-            print(f"Game over! Player {winner} has won with {self.game.players[winner].VPs} VPs.")
-            winner_score = -1
-            winner_agent = None
-            for ag in self.agents:
-                p_idx = self.agent_name_mapping[ag]
-                score = self.game.players[p_idx].VPs
-                if score > winner_score:
-                    winner_score = score
-                    winner_agent = ag
-            
+            winner_agent = self.agents[winner]
             for ag in self.agents:
                 self.terminations[ag] = True
                 self.rewards[ag] = 1.0 if ag == winner_agent else -1.0
-                self.infos[ag] = {}
+            self.infos = {ag: {} for ag in self.agents}
         else:
-             if self.game.players[idx].gems.sum() <= self.game.MAX_GEMS:
-                 self.agent_selection = self._selector.next()
-             
-             for ag in self.agents:
-                 if not self.terminations[ag]:
-                    current_player_idx = self.agent_name_mapping[self.agent_selection]
-                    self.infos[ag] = {"legal_moves": self.game.legal_actions(current_player_idx)}
-                 else:
+            # normal turn‐advance logic…
+            if self.game.players[idx].gems.sum() <= self.game.MAX_GEMS:
+                self.agent_selection = self._selector.next()
+            for ag in self.agents:
+                if not self.terminations[ag]:
+                    cur_idx = self.agent_name_mapping[self.agent_selection]
+                    self.infos[ag] = {"legal_moves": self.game.legal_actions(cur_idx)}
+                else:
                     self.infos[ag] = {}
-
         self._accumulate_rewards()
 
         if self.render_mode == "human":
             self.render()
             
-    def render(self): pass
+    def render(self):
+        print(f"  board gems  : {self.game.board_gems.tolist()}")
+
+        for lvl in range(3):
+            cards = []
+            for c in self.game.board_cards[lvl]:
+                row = [int(x) for x in (*c.cost, c.VPs, c.bonus)]
+                cards.append(row)
+            print(f"  tier {lvl+1} face-up: {cards}")
+
+        noble_reqs = [n.requirement.tolist() for n in self.game.nobles if n is not None]
+        print(f"  nobles reqs : {noble_reqs}")
+
+        # 5) For each player, print gems, bonuses, VP, and their reserved list
+        for i, p in enumerate(self.game.players):
+            gems    = p.gems.tolist()
+            bonuses = p.bonuses.tolist()
+            print(f"  P{i} gems     : {gems}  bonuses: {bonuses}  VP: {p.VPs}")
+            reserved = [[int(x) for x in (*c.cost, c.VPs, c.bonus)] for c in p.reserved]
+            print(f"     reserved  : {reserved}")
+        print()
     def close(self): pass
     def observation_space(self, agent): 
         return self.observation_spaces[agent]

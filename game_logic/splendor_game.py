@@ -65,7 +65,7 @@ class SplendorGame:
         nobles = [Noble(req) for req in nobles_data]
         np.random.shuffle(nobles)
         self.nobles = nobles[:len(nobles_data)] # Keep all initially, show N+1
-        # self.nobles = nobles[:3] # Show N+1 nobles (3 for 2 players)
+        self.nobles = nobles[:3] # Show N+1 nobles (3 for 2 players)
 
     def setup_board(self):
         for level in (0, 1, 2):
@@ -142,8 +142,9 @@ class SplendorGame:
         # Reserve Card / Reserve Deck
         if len(player.reserved) < 3:
             for level in (0,1,2):
-                for idx in range(len(self.board_cards[level])):
-                    actions.append((ActionType.RESERVE_CARD, (level, idx)))
+                for idx, card in enumerate(self.board_cards[level]):
+                    if card is not None:
+                        actions.append((ActionType.RESERVE_CARD, (level, idx)))
                 if self.decks[level]: # Check if deck has cards
                     actions.append((ActionType.RESERVE_DECK, (level, -1))) # FIX: Use level only
 
@@ -165,10 +166,9 @@ class SplendorGame:
 
     def step(self, action):
         type, param = action
+        #print("stepped")
         player = self.players[self.current_player]
 
-        if self.game_over:
-            print("why are we here")
         if type is ActionType.TAKE_DIFF:
             self.take_gems(player, list(param))
         elif type is ActionType.TAKE_SAME:
@@ -280,20 +280,35 @@ class SplendorGame:
                     break
         
     def decide_winner(self):
-        if not self.game_over:
-            return None
-        
         max_vp = max(player.VPs for player in self.players)
         max_bonus = max(player.bonuses.sum() for player in self.players)
         winner = [i for i, player in enumerate(self.players) if player.VPs == max_vp]
         
         if len(winner) == 1:
-            #print (f"Player {winner[0]} wins with {max_vp} VPs")
+            print (f"Player {winner[0]} wins with {max_vp} VPs")
             return winner[0]
-        else:
-            winner = [i for i, player in enumerate(self.players) if self.players[i].bonuses.sum() < max_bonus]
-            #print (f"Player {winner[0]} win with {max_vp} VPs and {max_bonus} bonuses")
-            return winner[0]
+
+        max_bonus = max(self.players[i].bonuses.sum() for i in winner)
+        bonus_winner = [i for i in winner if self.players[i].bonuses.sum() != max_bonus]
+        if len(bonus_winner) == 1:
+            print (f"Player {bonus_winner[0]} win with {max_vp} VPs and less bonuses")
+            return bonus_winner[0]
+        
+        max_gems = max(self.players[i].gems.sum() for i in winner)
+        gem_winner = [i for i in winner if self.players[i].gems.sum() != max_gems]
+        if len(gem_winner) == 1:
+            print (f"Player {gem_winner[0]} wins with {max_vp} VPs, less bonuses and less gems")
+            return gem_winner[0]
+        
+        max_reserved = max(len(self.players[i].reserved) for i in winner)
+        reserve_winner = [i for i in winner if len(self.players[i].reserved) != max_reserved]
+        if len(reserve_winner) == 1:
+            print(f"Player {reserve_winner[0]} wins with {max_vp} VPs, less bonuses, less gems and less reserved cards")
+            return reserve_winner[0]
+        
+        later_turn_winner = [i in winner for i in range(len(self.players)) if i != self.first_player] # final very unlikely tiebreaker
+        return later_turn_winner[0]
+
         
 
 # No empty masks, consistent action lists! Environment is good now it seems.
