@@ -285,19 +285,19 @@ class SplendorGame:
         winner = [i for i, player in enumerate(self.players) if player.VPs == max_vp]
         
         if len(winner) == 1:
-            print (f"Player {winner[0]} wins with {max_vp} VPs")
+            #print (f"Player {winner[0]} wins with {max_vp} VPs")
             return winner[0]
 
         max_bonus = max(self.players[i].bonuses.sum() for i in winner)
         bonus_winner = [i for i in winner if self.players[i].bonuses.sum() != max_bonus]
         if len(bonus_winner) == 1:
-            print (f"Player {bonus_winner[0]} win with {max_vp} VPs and less bonuses")
+            #print (f"Player {bonus_winner[0]} win with {max_vp} VPs and less bonuses")
             return bonus_winner[0]
         
         max_gems = max(self.players[i].gems.sum() for i in winner)
         gem_winner = [i for i in winner if self.players[i].gems.sum() != max_gems]
         if len(gem_winner) == 1:
-            print (f"Player {gem_winner[0]} wins with {max_vp} VPs, less bonuses and less gems")
+            #print (f"Player {gem_winner[0]} wins with {max_vp} VPs, less bonuses and less gems")
             return gem_winner[0]
         
         max_reserved = max(len(self.players[i].reserved) for i in winner)
@@ -307,7 +307,11 @@ class SplendorGame:
             return reserve_winner[0]
         
         later_turn_winner = [i in winner for i in range(len(self.players)) if i != self.first_player] # final very unlikely tiebreaker
+        print(f"Player {later_turn_winner[0]} wins with {max_vp} VPs, less bonuses, less gems, less reserved cards and later turn")
         return later_turn_winner[0]
+    
+    def clone(self) -> "SplendorGame":
+        return copy.deepcopy(self)
 
         
 

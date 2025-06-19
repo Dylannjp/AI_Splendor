@@ -1,108 +1,78 @@
-from splendor_env import SplendorEnv
 import numpy as np
+from splendor_env import SplendorGymEnv
+def main():
+    env = SplendorGymEnv()
+    print("Observation space:", env.observation_space)
+    print("Action space: Discrete({})".format(env.action_space.n))
 
-def test_raw_environment():
-    # Test the raw SplendorEnv without any wrappers, playing multiple games.
-    print("Testing raw SplendorEnv...")
+    # 1) RESET
+    obs, info = env.reset()
+    print("\n>>> After reset:")
+    print(" legal_count:", info["legal_count"])
+    for k, v in obs.items():
+        print(f"  {k:12s} → shape {np.shape(v)}, sample:", v.flatten()[:10])
 
-    env = SplendorEnv()
-    obs, info = env.reset(seed=42)
+    assert env.observation_space.contains(obs), "OBS out of space!"
 
-    step_count = 0
-    empty_mask_count = 0
-    game_count = 0
+    # 2) RUN one full random-legal episode
+    print("\n>>> Stepping randomly until done…")
+    done = False
+    total_steps = 0
+    reward = None
+    while not done and total_steps < 200:
+        # Always recompute legal moves from env.game
+        legal = env.game.legal_actions(0)  # list of (ActionType, param)
+        legal_idxs = [i for i, a in enumerate(env.all_actions) if a in legal]
+        assert legal_idxs, "No legal actions available!?"
+        choice = np.random.choice(legal_idxs)
 
-    print(f"Initial agent: {env.agent_selection}")
-    print(f"Initial mask sum: {obs['action_mask'].sum()}")
+        obs, reward, done, truncated, info = env.step(choice)
+        total_steps += 1
 
-    max_steps = 50000
-    for step in range(max_steps):
-        current_agent = env.agent_selection
-        obs = env.observe(current_agent)
-        mask = obs['action_mask']
+        # verify obs validity each step
+        assert env.observation_space.contains(obs), f"Step {total_steps}: obs invalid!"
+        if total_steps % 10 == 0:
+            print(f"  step {total_steps:3d}, reward {reward}, legal_count {info['legal_count']}")
+            for k, v in obs.items():
+                print(f"  {k:12s} → shape {np.shape(v)}, sample:", v.flatten()[:])
 
-        if mask.sum() == 0:
-            empty_mask_count += 1
-            print(f"\n[EMPTY MASK #{empty_mask_count}] Step {step}")
-            print(f"  Current agent: {current_agent}")
-            print(f"  Terminations: {env.terminations}")
-            print(f"  Truncations: {env.truncations}")
-            if env.game:
-                agent_idx = env.agent_name_mapping[current_agent]
-                legal_actions = env.game.legal_actions(agent_idx)
-                print(f"  Direct legal actions: {len(legal_actions)}")
-                print(f"  Game VPs: {[p.VPs for p in env.game.players]}")
-                print(f"  Game gems: {[p.gems.sum() for p in env.game.players]}")
-            print("  CRITICAL: Empty mask detected!")
-            break
+    print(f"\nEpisode finished in {total_steps} steps, final reward = {reward}")
 
-        # take a random valid action
-        valid_indices = np.where(mask)[0]
-        action_idx = np.random.choice(valid_indices)
-        env.step(action_idx)
-        step_count += 1
+    # 3) Inspect that face-up cards are marked as 1
+    print("\n>>> Checking face-up marking at end:")
+    for lvl, key, size in ((0, "tier1cards", 40), (1, "tier2cards", 30), (2, "tier3cards", 20)):
+        arr = obs[key]
+        faceup_tuples = [
+            (c.level, c.bonus, c.VPs, tuple(c.cost))
+            for c in env.game.board_cards[lvl] if c
+        ]
+        for tpl in faceup_tuples:
+            idx = env.card_index_map[lvl][tpl]
+            assert arr[idx] == 1, f"Tier{lvl+1} template {tpl} should be marked face-up=1"
+    print("  face-up check passed!")
 
-        # if game ended, count it and immediately reset
-        if any(env.terminations.values()) or any(env.truncations.values()):
-            game_count += 1
-            print(f"\nGame #{game_count} ended at step {step}")
-            print(f"  Terminations: {env.terminations}")
-            print(f"  Rewards: {env.rewards}")
-            # reset and carry on
-            obs = env.reset()
-            continue
+    # 4) Reserved/taken marking: pick one RESERVE action
+    print("\n>>> Checking reserve/taken marking:")
+    obs0, info0 = env.reset()
+    legal0 = env.game.legal_actions(0)
+    reserve_idxs = [
+        i for i, a in enumerate(env.all_actions)
+        if a in legal0 and a[0].name.startswith("RESERVE")
+    ]
+    assert reserve_idxs, "No RESERVE action legal on first turn!"
+    choice = reserve_idxs[0]
+    obs1, _, _, _, _ = env.step(choice)
 
-    print(f"\nTest completed. Total steps: {step_count}, games played: {game_count}")
-    print(f"Empty masks encountered: {empty_mask_count}")
-    
+    # Check that at least one card slot flipped to 2
+    changed = (
+        np.any(obs1["tier1cards"] == 2)
+        or np.any(obs1["tier2cards"] == 2)
+        or np.any(obs1["tier3cards"] == 2)
+    )
+    assert changed, "No card slot changed to 2 after reserve!"
+    print("  reserve marking passed!")
 
-def test_action_consistency():
-    # Test if all_actions and legal_actions are consistent
-    print("\nTesting action consistency...")
-    
-    env = SplendorEnv()
-    obs, info = env.reset(seed=123)
-    
-    # Check all_actions vs legal_actions consistency
-    print(f"Total actions in all_actions: {len(env.all_actions)}")
-    
-    for step in range(50):
-        current_agent = env.agent_selection
-        agent_idx = env.agent_name_mapping[current_agent]
-        
-        # Get legal actions directly from game
-        legal_actions_raw = env.game.legal_actions(agent_idx)
-        
-        # Get legal actions through observe
-        obs = env.observe(current_agent)
-        mask = obs['action_mask']
-        legal_indices = np.where(mask)[0]
-        legal_actions_from_mask = [env.all_actions[i] for i in legal_indices]
-        
-        # Compare
-        if set(legal_actions_raw) != set(legal_actions_from_mask):
-            print(f"MISMATCH at step {step}:")
-            print(f"  Raw legal: {sorted(legal_actions_raw)}")
-            print(f"  From mask: {sorted(legal_actions_from_mask)}")
-            print(f"  Missing from mask: {set(legal_actions_raw) - set(legal_actions_from_mask)}")
-            print(f"  Extra in mask: {set(legal_actions_from_mask) - set(legal_actions_raw)}")
-            break
-        
-        if len(legal_actions_raw) == 0:
-            print(f"Empty legal actions at step {step} - game should be terminated")
-            break
-            
-        # Take action
-        action_to_take = legal_actions_raw[0]  # Take first legal action
-        action_idx = env.all_actions.index(action_to_take)
-        env.step(action_idx)
-        
-        if any(env.terminations.values()):
-            break
-    
-    print("Action consistency test completed.")
-
+    print("\n✅ All manual tests passed!")
 
 if __name__ == "__main__":
-    test_raw_environment()
-    test_action_consistency()
+    main()
