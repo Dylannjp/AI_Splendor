@@ -2,7 +2,7 @@ import torch
 from splendor_env import SplendorGymEnv
 from muzero_net import MuZeroNet
 from replay_buffer import ReplayBuffer
-from train_muzero import train_muzero
+from train_muzero_parallel import train_muzero
 
 def main():
     # 1) Create environment
@@ -13,10 +13,10 @@ def main():
     net = MuZeroNet(env.observation_space, env.action_space.n)
 
     # 3) Create replay buffer (e.g. capacity for 1,000 games)
-    buffer = ReplayBuffer(capacity=2500)
+    buffer = ReplayBuffer(capacity=3)
 
     # 4) Optionally move to GPU if available
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda")
     print(f"Training on {device}")
 
     # 5) Train
@@ -24,9 +24,9 @@ def main():
         env=env,
         net=net,
         buffer=buffer,
-        epochs=20000,        # number of self‐play games
-        batch_size=64,
-        unroll_steps=15,
+        epochs=5,        # number of self‐play games
+        batch_size=2,
+        unroll_steps=5,
         lr=1e-3,
         device=device
     )

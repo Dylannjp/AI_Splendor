@@ -38,14 +38,15 @@ class MuZeroNet(nn.Module):
         self.pred_v  = nn.Linear(hidden_size, 1)
 
         # device will be set externally, e.g. net.to(device); we track for convenience
-        self.device = torch.device("cpu")
+        self.device = torch.device("cuda")
 
     def to(self, *args, **kwargs):
-        """Override so we can capture the device."""
         module = super().to(*args, **kwargs)
-        # assume first arg is device or dtype
-        if isinstance(args[0], torch.device):
+        # Fix: track device properly (important for multiprocessing)
+        if args and isinstance(args[0], torch.device):
             self.device = args[0]
+        elif 'device' in kwargs:
+            self.device = kwargs['device']
         return module
 
     def _flatten_obs(self, obs_dict: dict) -> torch.Tensor:

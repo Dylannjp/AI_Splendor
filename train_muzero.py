@@ -17,7 +17,136 @@ mcts_config = MCTSConfig(num_simulations=125, cpuct=1.0, discount=0.99, dirichle
 def train_muzero(
     env,                # SplendorGymEnv instance
     net: MuZeroNet,     # your MuZero network
+    buffer: ReplayBuffer,# train_muzero_vectorized.py
+
+import copy
+import numpy as np
+import torch
+from torch import optim
+import torch.nn.functional as F
+from gymnasium.vector import SyncVectorEnv
+from tqdm import trange
+
+from mcts import MCTS, MCTSConfig
+from replay_buffer import ReplayBuffer
+from muzero_net import MuZeroNet
+from train_muzero import build_training_data, muzero_loss, evaluate
+
+# your hyperparameters
+mcts_config = MCTSConfig(
+    num_simulations=25,   # fewer sims to speed up
+    cpuct=1.0,
+    discount=0.99,
+    dirichlet_alpha=0.15,
+    exploration_frac=0.25
+)
+
+def make_vec_env(num_envs, EnvClass):
+    """Wrap EnvClass into a vector of num_envs copies."""
+    def make_one(rank):
+        def _thunk():
+            env = EnvClass()
+            env.reset(seed=rank)
+            return env
+        return _thunk
+    return SyncVectorEnv([make_one(i) for i in range(num_envs)])
+
+
+def train_muzero(
+    EnvClass,
+    net: MuZeroNet,
     buffer: ReplayBuffer,
+    config=mcts_config,
+    epochs=5000,       
+    batch_size=32,
+    unroll_steps=5,
+    lr=1e-3,
+    device="cuda",
+    num_envs=8,        # ← run 8 games in parallel
+    eval_every=500
+):
+    net.to(device)
+    optimizer = optim.Adam(net.parameters(), lr=lr)
+
+    # 1) build vectorized env
+    vec_env = make_vec_env(num_envs, EnvClass)
+    obs_batch, infos = vec_env.reset()
+    mask_batch = np.stack([info["legal_mask"] for info in infos], axis=0)  # [K, A]
+
+    # flatten into dict of arrays [K,...]
+    obs_dict = {
+        k: np.stack([o[k] for o in obs_batch], axis=0)
+        for k in net.obs_keys
+    }
+    hidden = net.initial_state(obs_dict)  # [K, H]
+
+    losses = []
+    for step in trange(epochs):
+        # --------------------------
+        # (A) Vectorized self-play
+        # --------------------------
+        policies = np.zeros_like(mask_batch, dtype=np.float32)  # [K, A]
+        actions  = np.zeros((num_envs,), dtype=np.int64)
+
+        # for each sub-environment, run a short MCTS
+        for i in range(num_envs):
+            mcts = MCTS(
+                net, config,
+                all_actions=vec_env.envs[i].all_actions,
+                root_game=copy.deepcopy(vec_env.envs[i].game)
+            )
+            root = mcts.run(hidden[i : i+1], mask_batch[i])
+
+            # build policy from visit counts
+            visits = np.zeros(mask_batch.shape[1], dtype=np.float32)
+            for a, child in root.children.items():
+                visits[a] = child.visit_count
+            if visits.sum() > 0:
+                visits /= visits.sum()
+            policies[i] = visits
+            actions[i] = visits.argmax()
+
+        # step all envs in one vector call
+        next_obs_batch, rewards, dones, truncs, infos = vec_env.step(actions)
+        next_mask = np.stack([info["legal_mask"] for info in infos], axis=0)
+
+        # add each (obs,policy,reward,action) to the buffer
+        for i in range(num_envs):
+            buffer.add((obs_batch[i], policies[i], rewards[i], actions[i]))
+
+        # prepare next obs & hidden
+        obs_batch   = next_obs_batch
+        mask_batch  = next_mask
+        obs_dict    = { k: np.stack([o[k] for o in obs_batch], axis=0) 
+                        for k in net.obs_keys }
+        a_tensor    = torch.tensor(actions, device=device)
+        hidden, _   = net.dynamics(hidden, a_tensor)
+
+        # --------------------------
+        # (B) Gradient update
+        # --------------------------
+        if len(buffer) >= batch_size:
+            batch = buffer.sample_batch(batch_size, unroll_steps)
+            loss  = muzero_loss(net, batch, config, device=device)
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(net.parameters(), 5.0)
+            optimizer.step()
+            losses.append(loss.item())
+
+        # logging
+        if (step + 1) % 100 == 0 and losses:
+            print(f"Step {step+1:5d}: avg loss={np.mean(losses[-10:]):.4f}")
+
+        # periodic evaluation
+        if (step + 1) % eval_every == 0:
+            win_rate = evaluate(net, vec_env.envs[0], n_games=50)
+            print(f"--> Eval vs random: {win_rate:.2f}")
+
+    # final save
+    torch.save(net.state_dict(), "muzero_splendor_vector.pth")
+    return net
+
     config=mcts_config,
     epochs=5000,       # total games to generate
     batch_size=32,
