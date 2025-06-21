@@ -1,4 +1,3 @@
-
 import numpy as np
 import torch
 from torch import optim
@@ -11,7 +10,7 @@ import copy
 from tqdm import trange
 import torch.multiprocessing as mp
 
-Config = namedtuple("MCTSConfig", ["num_simulations", "cpuct", "discount", "dirichlet_alpha", "exploration_frac"])
+MCTSConfig = namedtuple("MCTSConfig", ["num_simulations", "cpuct", "discount", "dirichlet_alpha", "exploration_frac"])
 mcts_config = MCTSConfig(num_simulations=125, cpuct=1.0, discount=0.99, dirichlet_alpha=0.15, exploration_frac=0.25)
 
 def self_play_worker(worker_id, net_state_dict, env_cls, config, conn):
@@ -21,22 +20,21 @@ def self_play_worker(worker_id, net_state_dict, env_cls, config, conn):
     net.to(torch.device("cuda"))
     
     obs, info = env.reset()
-    legal_mask = info["legal_mask"]
     trajectory = []
     done = False
 
     obs_tensor = {
-        k: torch.tensor(obs[k][None], dtype=torch.float32).to(net.device)
+        k: torch.tensor(obs[k], dtype=torch.float32, device=net.device).unsqueeze(0)
         for k in net.obs_keys
     }
     hidden = net.initial_state(obs_tensor)
 
     root = None
     while not done:
-        mcts = MCTS(net, config, all_actions=env.all_actions, root_game=copy.deepcopy(env.game))
+        mcts = MCTS(net, config, all_actions=env.all_actions)
         if root is not None:
             pass
-        root = mcts.run(hidden, legal_mask)
+        root = mcts.run(hidden, env.game)
         visits = np.array([root.children[a].visit_count if a in root.children else 0
                            for a in range(net.action_space_size)], dtype=np.float32)
         visits /= visits.sum() if visits.sum() > 0 else 1.0
@@ -44,9 +42,12 @@ def self_play_worker(worker_id, net_state_dict, env_cls, config, conn):
         next_obs, reward, done, truncated, info = env.step(a)
         trajectory.append((obs, visits, reward, a))
         root = root.children[a]
-        hidden = root.hidden_state
-        legal_mask = info["legal_mask"] 
+        hidden = root.hidden_state 
         obs = next_obs
+        obs_tensor = {
+        k: torch.tensor(obs[k], dtype=torch.float32, device=net.device).unsqueeze(0)
+        for k in net.obs_keys
+        }
 
     conn.send(trajectory)
     conn.close()
@@ -56,18 +57,18 @@ def train_muzero(
     net: MuZeroNet,
     buffer: ReplayBuffer,
     config=mcts_config,
-    epochs=5000,
+    epochs=1000,
     batch_size=32,
     unroll_steps=5,
     lr=1e-3,
     device="cuda",
-    num_workers=4
+    num_workers=16
 ):
     net.to(device)
     optimizer = optim.Adam(net.parameters(), lr=lr)
     mp.set_start_method("spawn", force=True)
 
-    num_updates_per_epoch = 4  # typically match num_workers
+    num_updates_per_epoch = 1  # typically match num_workers
     loss = None
     for game_idx in trange(epochs):
         processes = []
@@ -118,22 +119,11 @@ def build_training_data(net, batch, config, device):
     batch["reward"]: [B, T+1]
     batch["actions"]: [B, T+1]
     """
-    obs_dict   = batch["obs"]
     pi_np      = batch["policy"]
     rewards_np = batch["reward"]
     actions_np = batch["actions"]
     B, T1, A   = pi_np.shape
     gamma      = config.discount
-
-
-    # 1) initial obs at t=0
-    obs0 = {
-        k: torch.tensor(obs_dict[k][:,0], dtype=torch.float32, device=device)
-        for k in net.obs_keys
-    }
-    # 2) compute s0
-    with torch.no_grad():
-        state0 = net.initial_state(obs0)  # [B, H]
 
     # 3) targets
     policy_target = torch.tensor(pi_np[:, :-1, :], dtype=torch.float32, device=device)  # [B, T, A]
@@ -192,18 +182,22 @@ def muzero_loss(net: MuZeroNet, batch: dict, config, device="cuda"):
 
 def evaluate(net, env, n_games=50):
     wins = 0
+    device = next(net.parameters()).device
     for _ in range(n_games):
         obs, info = env.reset()
         done = False
-        hidden = net.initial_state({k: torch.tensor(obs[k][None]).float() for k in net.obs_keys})
-        mask = info["legal_mask"]
+
+        obs_tensor = {
+            k: torch.tensor(obs[k], dtype=torch.float32, device=net.device).unsqueeze(0)
+            for k in net.obs_keys
+        }
+        hidden = net.initial_state(obs_tensor)
         while not done:
             # simple MCTS or greedy policy
-            mcts = MCTS(net, mcts_config, env.all_actions, copy.deepcopy(env.game))
-            root = mcts.run(hidden, mask)
+            mcts = MCTS(net, mcts_config, env.all_actions)
+            root = mcts.run(hidden, env.game)
             a = max(root.children, key=lambda a: root.children[a].visit_count)
             obs, reward, done, _, info = env.step(a)
-            mask = info["legal_mask"]
             action_idx = torch.tensor([a], device=hidden.device, dtype=torch.long)  # shape (1,)
             hidden, _ = net.dynamics(hidden, action_idx)
         if reward > 0:

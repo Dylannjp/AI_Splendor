@@ -19,7 +19,7 @@ def simulate_self_play(net, env, config: MCTSConfig, render: bool = False):
 
     # initial hidden state [1, H]
     obs_tensor = {
-        k: torch.tensor(obs[k][None], device=net.device, dtype=torch.float32)
+        k: torch.tensor(obs[k], dtype=torch.float32, device=net.device).unsqueeze(0)
         for k in net.obs_keys
     }
     hidden = net.initial_state(obs_tensor)
@@ -32,8 +32,8 @@ def simulate_self_play(net, env, config: MCTSConfig, render: bool = False):
         # Our turn: use MCTS + policy
         if turn == 0:
             # build MCTS from current hidden + mask
-            mcts = MCTS(net, config, all_actions=env.all_actions, root_game=copy.deepcopy(env.game))
-            root = mcts.run(hidden, legal_mask)
+            mcts = MCTS(net, config, all_actions=env.all_actions)
+            root = mcts.run(hidden, env.game)
 
             # extract policy = normalized visit counts
             visits = np.zeros(net.action_space_size, dtype=np.float32)

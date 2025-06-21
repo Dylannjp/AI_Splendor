@@ -1,9 +1,9 @@
-from collections import namedtuple
 import math
-import torch
+import copy
 import numpy as np
+import torch
+from typing import Dict, Sequence, Optional, List, Any
 from collections import namedtuple
-
 
 MCTSConfig = namedtuple("MCTSConfig", [
     "num_simulations",
@@ -14,122 +14,126 @@ MCTSConfig = namedtuple("MCTSConfig", [
 ])
 
 class Node:
-    def __init__(self, prior):
-        self.visit_count  = 0
-        self.prior        = prior
-        self.value_sum    = 0
-        self.children     = {}  # action -> Node
-        self.hidden_state = None
-        self.reward       = 0
-        self.game_state   = None  # store the game state for reference
+    def __init__(self, prior: float, env_state: Any):
+        # UCB stats
+        self.visit_count: int    = 0
+        self.prior: float        = prior
+        self.value_sum: float    = 0.0
 
-    def expanded(self):
+        # latent & reward
+        self.hidden_state: Optional[torch.Tensor] = None
+        self.reward: float       = 0.0
+
+        # SplendorGame clone (for mask queries only)
+        self.env_state: Any      = env_state
+
+        # children: action index → Node
+        self.children: Dict[int, "Node"] = {}
+
+    @property
+    def value(self) -> float:
+        return self.value_sum / self.visit_count if self.visit_count > 0 else 0.0
+
+    def expanded(self) -> bool:
         return bool(self.children)
 
-    def value(self):
-        return self.value_sum / (1 + self.visit_count)
-
 class MCTS:
-    def __init__(self, net, config: MCTSConfig, all_actions, root_game):
-        self.net    = net
-        self.config = config
+    def __init__(
+        self,
+        net: Any,
+        config: Any,
+        all_actions: Sequence[Any],
+    ):
+        self.net         = net
+        self.config      = config
         self.all_actions = all_actions
-        self.root_game = root_game
 
-    def run(self, root_hidden, legal_mask):
-        # 1) Initialize root
-        root = Node(prior=1.0)  # root is always player 0's turn
+    def run(self, root_hidden: torch.Tensor, root_env: Any) -> Node:
+        """
+        root_hidden: latent state from net.initial_state(obs)
+        root_env:    a SplendorGame instance at the current public state
+        """
+        # 1) Root inference
+        policy_logits, value = self.net.prediction(root_hidden)
+        root = Node(prior=1.0, env_state=copy.deepcopy(root_env))
         root.hidden_state = root_hidden
-        root.game_state = self.root_game.clone()  # store the game state for reference
-        # get initial policy & value
-        pi, v = self.net.prediction(root_hidden)
-        root.value_sum += v.item()
-        root.visit_count += 1
+        root.value_sum    = value.item()
+        root.visit_count  = 1
 
-        for a, p in enumerate(pi[0]):
-            if legal_mask[a]: 
-                child = Node(prior=p.item())
-                gs = root.game_state.clone()  # clone the game state for each action
-                gs.step(self.all_actions[a])
-                child.game_state = gs
-                child.hidden_state = None
-                root.children[a] = child
-        
-        # add Dirichlet noise for exploration at the root
-        if self.config.dirichlet_alpha > 0:
-            actions = list(root.children)
-            noise = np.random.dirichlet([self.config.dirichlet_alpha] * len(actions))
-            for a, n in zip(actions, noise):
-                root.children[a].prior = (
-                    root.children[a].prior * (1 - self.config.exploration_frac)
-                    + n * self.config.exploration_frac
-                )
+        # 2) Seed root children using real env legality
+        legal = set(root.env_state.legal_actions(root.env_state.current_player))
+        priors = torch.softmax(policy_logits[0], dim=-1)
+        for a, p in enumerate(priors):
+            if self.all_actions[a] in legal:
+                child_env = copy.deepcopy(root.env_state)
+                root.children[a] = Node(prior=p.item(), env_state=child_env)
 
-        # 2) Simulations
+        self.add_dirichlet_noise(root)
+
+        # 3) Simulations
         for _ in range(self.config.num_simulations):
-            node = root
-            search_path = [node]
-            selected_actions = []  # keep track of actions taken in this simulation
+            node, path = root, [root]
 
-            # a) Selection
+            # -- Selection --
             while node.expanded():
-                # find best action by UCB:
-                best_a = max(
-                node.children.keys(),
-                key=lambda a: self._ucb_score(node, node.children[a])
-                )
-                selected_actions.append(best_a)  # remember the action taken
-                node = node.children[best_a]
-                search_path.append(node)
-                action_taken = best_a    # remember which action you just followed
+                action, node = self.select_child(node)
+                path.append(node)
 
-            # b) Expansion & Evaluation
-            parent = search_path[-2]
-            action_taken = selected_actions[-1]
+            parent = path[-2]
 
-            gs = parent.game_state.clone()  # clone the game state for the action
-            gs.step(self.all_actions[action_taken])
+            # -- Expansion & rollout in latent space --
+            action_idx = torch.tensor([action], device=parent.hidden_state.device)
+            h, r        = self.net.dynamics(parent.hidden_state, action_idx)
+            node.hidden_state = h.detach()
+            node.reward       = r.item()
+            pl2, v2           = self.net.prediction(h)
+            node.value_sum    = v2.item()
+            node.visit_count  = 1
 
-            a_tensor = torch.tensor([action_taken], device=self.net.device)
-            next_hidden, reward = self.net.dynamics(parent.hidden_state, a_tensor)
-            next_hidden = next_hidden.detach()  # detach to avoid backprop through dynamics
+            # -- Advance the env clone for legality only --
+            child_env      = copy.deepcopy(parent.env_state)
+            child_env.step(self.all_actions[action])
+            node.env_state = child_env
 
-            node.hidden_state = next_hidden
-            node.reward = reward.item()
-            node.game_state = gs
+            # -- Seed grandchildren --
+            legal2  = set(child_env.legal_actions(child_env.current_player))
+            priors2 = torch.softmax(pl2[0], dim=-1)
+            for a2, p2 in enumerate(priors2):
+                if self.all_actions[a2] in legal2:
+                    node.children[a2] = Node(prior=p2.item(),
+                                             env_state=copy.deepcopy(child_env))
 
-            pi2, v2 = self.net.prediction(next_hidden)
-
-            legal_next = gs.legal_actions(gs.current_player)
-            mask_next  = np.zeros(len(self.all_actions), dtype=bool)
-            for act in legal_next:
-                idx = self.all_actions.index(act)
-                mask_next[idx] = True
-
-            # 2) only expand those indices
-            for a2, p2 in enumerate(pi2[0]):
-                if not mask_next[a2]:
-                    continue
-
-                # now safe to simulate it
-                child = Node(prior=p2.item())
-                gs2   = gs.clone()
-                gs2.step(self.all_actions[a2])   # this will never IndexError now
-                child.game_state = gs2
-                node.children[a2] = child
-
-            # c) Backup
-            self._backpropagate(search_path, v2.item())
+            # -- Backup --
+            self.backpropagate(path, v2.item(), self.config.discount)
 
         return root
 
-    def _ucb_score(self, parent, child):
-        pb_c = math.log((parent.visit_count + self.config.cpuct + 1) / self.config.cpuct) + 1
-        pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
-        return child.value() + pb_c * child.prior
-    
-    def _backpropagate(self, path, value):
-        for node in reversed(path):
-            node.value_sum   += value
-            node.visit_count += 1
-            value = node.reward + self.config.discount * value
+    def add_dirichlet_noise(self, root: Node):
+        alpha, frac = self.config.dirichlet_alpha, self.config.exploration_frac
+        if frac <= 0 or alpha <= 0:
+            return
+        num = len(root.children)
+        if num == 0:
+            return
+        noise = np.random.dirichlet([alpha] * num)
+        for (a, child), n in zip(root.children.items(), noise):
+            child.prior = child.prior * (1 - frac) + n * frac
+
+    def select_child(self, node: Node):
+        best_score = -float('inf')
+        best_a, best_c = None, None
+        for a, c in node.children.items():
+            ucb = (
+                c.value
+                + self.config.cpuct * c.prior * math.sqrt(node.visit_count)
+                  / (1 + c.visit_count)
+            )
+            if ucb > best_score:
+                best_score, best_a, best_c = ucb, a, c
+        return best_a, best_c
+
+    def backpropagate(self, path: List[Node], value: float, discount: float):
+        for n in reversed(path):
+            n.value_sum   += value
+            n.visit_count += 1
+            value = n.reward + discount * value

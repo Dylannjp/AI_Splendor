@@ -21,7 +21,7 @@ def main():
 
     # 5) Train
     trained_net = train_muzero(
-        env=env,
+        env,
         net=net,
         buffer=buffer,
         epochs=5,        # number of self‐play games

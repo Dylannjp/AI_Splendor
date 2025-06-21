@@ -79,7 +79,6 @@ if __name__ == '__main__':
 """
 
 def main():
-    print("ws")
     env = SplendorGymEnv()
     print("Observation space:", env.observation_space)
     print("Action space: Discrete({})".format(env.action_space.n))
@@ -183,4 +182,4 @@ def main():
     print("\n✅ All tests passed successfully!")
 
 if __name__ == "__main__":
-        main()
+    main()

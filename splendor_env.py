@@ -104,6 +104,31 @@ class SplendorGymEnv(gym.Env):
 
         return self.obs_cache, reward, terminated, False, {"legal_mask": self.mask_buf}
 
+    def make_obs(self):
+
+        obs = {
+            "tier1cards": np.zeros(40, dtype=np.int8),
+            "tier2cards": np.zeros(30, dtype=np.int8),
+            "tier3cards": np.zeros(20, dtype=np.int8),
+            "nobles": np.array([1 if n is not None else 2 for n in self.game.nobles[:3]], dtype=np.int8),
+            "board_gems": [4,4,4,4,4,5],
+            "my_gems": [0,0,0,0,0,0],
+            "opp_gems": [0,0,0,0,0,0],
+            "my_bonuses": [0,0,0,0,0],
+            "opp_bonuses": [0,0,0,0,0],
+            "my_score": 0,
+            "opp_score": 0,
+            "my_reserved_count": 0,
+            "opp_reserved_count": 0,
+        }
+        for lvl, key in ((0, "tier1cards"), (1, "tier2cards"), (2, "tier3cards")):
+            for c in self.game.board_cards[lvl]:
+                if c:
+                    tpl_key = normalize_card_key(c)
+                    idx = self.card_index_map[lvl][tpl_key]
+                    obs[key][idx] = 1
+        return obs
+    
     def update_obs_delta(self, obs, action, player):
         actor = self.game.players[player]
         is_agent = (player == self.agent_player)
@@ -166,32 +191,6 @@ class SplendorGymEnv(gym.Env):
             for i, noble in enumerate(self.game.nobles[:3]):
                 obs["nobles"][i] = 2 if noble is None else 1
 
-    def make_obs(self):
-        my = self.game.players[self.agent_player]
-        opp = self.game.players[self.opponent_player]
-        obs = {
-            "tier1cards": np.zeros(40, dtype=np.int8),
-            "tier2cards": np.zeros(30, dtype=np.int8),
-            "tier3cards": np.zeros(20, dtype=np.int8),
-            "nobles": np.array([1 if n is not None else 2 for n in self.game.nobles[:3]], dtype=np.int8),
-            "board_gems": self.game.board_gems.copy(),
-            "my_gems": my.gems.copy(),
-            "opp_gems": opp.gems.copy(),
-            "my_bonuses": my.bonuses.copy(),
-            "opp_bonuses": opp.bonuses.copy(),
-            "my_score": my.VPs,
-            "opp_score": opp.VPs,
-            "my_reserved_count": len(my.reserved),
-            "opp_reserved_count": len(opp.reserved),
-        }
-        for lvl, key in ((0, "tier1cards"), (1, "tier2cards"), (2, "tier3cards")):
-            for c in self.game.board_cards[lvl]:
-                if c:
-                    tpl_key = normalize_card_key(c)
-                    idx = self.card_index_map[lvl][tpl_key]
-                    obs[key][idx] = 1
-        return obs
-
     def action_to_card(self, action):
         type, param = action
         card = None
@@ -214,5 +213,6 @@ class SplendorGymEnv(gym.Env):
                   "VPs:", p.VPs,
                   "Reserved:", [(c.level, c.VPs) for c in p.reserved])
         print(" Face-up board sizes:", [len(b) for b in self.game.board_cards])
+        print(" Nobles:", [n.requirement.tolist() if n else None for n in self.game.nobles[:3]])
         print(" Deck sizes:", [len(d) for d in self.game.decks])
         print("---------------")
